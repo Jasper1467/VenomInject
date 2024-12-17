@@ -283,16 +283,153 @@ std::vector<ProcessInfo_t> GetProcessList()
 	return processes;
 }
 
+void RenderFilterAndRefresh(std::vector<ProcessInfo_t>& vecAllProcesses,
+	std::vector<ProcessInfo_t>& vecFilteredProcesses,
+	char szFilterText[128],
+	std::string& previousFilter)
+{
+	ImGui::InputText("Filter", szFilterText, IM_ARRAYSIZE(szFilterText));
+	ImGui::SameLine();
+
+	if (ImGui::Button("Refresh"))
+	{
+		vecAllProcesses = GetProcessList();
+		vecFilteredProcesses = vecAllProcesses; // Reset filtered list
+	}
+
+	// Apply filtering logic
+	if (previousFilter != szFilterText)
+	{
+		previousFilter = szFilterText;
+		vecFilteredProcesses.clear();
+
+		for (const auto& process : vecAllProcesses)
+		{
+			std::wstring nameLower = process.name;
+			std::wstring filterLower = std::wstring(szFilterText, szFilterText + strlen(szFilterText));
+
+			std::transform(nameLower.begin(), nameLower.end(), nameLower.begin(), ::towlower);
+			std::transform(filterLower.begin(), filterLower.end(), filterLower.begin(), ::towlower);
+
+			if (nameLower.find(filterLower) != std::wstring::npos)
+				vecFilteredProcesses.push_back(process);
+		}
+	}
+}
+
+void RenderDllInput(std::vector<std::string>& addedDlls, char szDllPathInput[1024])
+{
+	if (ImGui::InputTextWithHint("##DLLPath", "Enter DLL Path...", szDllPathInput, sizeof(szDllPathInput), ImGuiInputTextFlags_EnterReturnsTrue))
+	{
+		if (strlen(szDllPathInput) > 0)
+		{
+			addedDlls.push_back(std::string(szDllPathInput));
+			szDllPathInput[0] = '\0'; // Clear input
+		}
+	}
+
+	ImGui::SameLine();
+	if (ImGui::Button("Browse"))
+	{
+		std::string selectedPath = Utilities::OpenFileExplorerDialog();
+		if (!selectedPath.empty())
+		{
+			addedDlls.push_back(selectedPath);
+		}
+	}
+}
+
+void RenderProcessTable(const std::vector<ProcessInfo_t>& vecFilteredProcesses, int& selectedProcessIndex)
+{
+	ImGui::BeginChild("ProcessTableChild", ImVec2(400, 300), true);
+	if (ImGui::BeginTable("ProcessTable", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY))
+	{
+		ImGui::TableSetupColumn("PID", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+		ImGui::TableSetupColumn("Process Name", ImGuiTableColumnFlags_WidthStretch);
+		ImGui::TableHeadersRow();
+
+		for (size_t i = 0; i < vecFilteredProcesses.size(); ++i)
+		{
+			const auto& process = vecFilteredProcesses[i];
+
+			ImGui::TableNextRow();
+			ImGui::TableSetColumnIndex(0);
+			if (ImGui::Selectable(std::to_string(process.pid).c_str(), selectedProcessIndex == i, ImGuiSelectableFlags_SpanAllColumns))
+			{
+				selectedProcessIndex = i;
+			}
+
+			ImGui::TableSetColumnIndex(1);
+			ImGui::TextUnformatted(std::string(process.name.begin(), process.name.end()).c_str());
+		}
+		ImGui::EndTable();
+	}
+	ImGui::EndChild();
+}
+
+void RenderDllTable(std::vector<std::string>& addedDlls)
+{
+	ImGui::BeginChild("DllTableChild", ImVec2(500, 300), true);
+	if (ImGui::BeginTable("DllTable", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
+	{
+		ImGui::TableSetupColumn("DLL Path", ImGuiTableColumnFlags_WidthStretch);
+		ImGui::TableSetupColumn("Platform", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+		ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+		ImGui::TableHeadersRow();
+
+		for (size_t i = 0; i < addedDlls.size(); ++i)
+		{
+			ImGui::TableNextRow();
+			ImGui::TableSetColumnIndex(0);
+			ImGui::TextUnformatted(addedDlls[i].c_str());
+
+			ImGui::TableSetColumnIndex(1);
+			std::string platform = Utilities::GetDllPlatform(addedDlls[i].c_str());
+			ImGui::TextUnformatted(platform.c_str());
+
+			ImGui::TableSetColumnIndex(2);
+			if (ImGui::Button(("Delete##" + std::to_string(i)).c_str()))
+			{
+				addedDlls.erase(addedDlls.begin() + i);
+				break;
+			}
+		}
+		ImGui::EndTable();
+	}
+	ImGui::EndChild();
+}
+
+void RenderInjectionButton(const std::vector<ProcessInfo_t>& vecFilteredProcesses, int selectedProcessIndex, const std::vector<std::string>& addedDlls)
+{
+	if (ImGui::Button("Inject DLL") && selectedProcessIndex >= 0 && !addedDlls.empty())
+	{
+		const auto& selectedProcess = vecFilteredProcesses[selectedProcessIndex];
+		HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, selectedProcess.pid);
+
+		if (hProcess)
+		{
+			Injector::Inject(hProcess, addedDlls, (Injector::Method_e)Vars::g_nInjectionMethod);
+			CloseHandle(hProcess);
+		}
+	}
+}
+
+void RenderSettingsTab()
+{
+	ImGui::Combo("Injection Method", reinterpret_cast<int*>(&Vars::g_nInjectionMethod), Injector::g_szMethodNames, Injector::GetMethodCount());
+}
+
 void Menu::Render()
 {
-	static std::vector<ProcessInfo_t> allProcesses = GetProcessList();
-	static std::vector<ProcessInfo_t> vecFilteredProcesses = allProcesses;
+	static std::vector<ProcessInfo_t> vecAllProcesses = GetProcessList();
+	static std::vector<ProcessInfo_t> vecFilteredProcesses = vecAllProcesses;
 
 	static std::vector<std::string> addedDlls;  // List of DLLs that the user added
-	static char szDllPathInput[1024] = "";     // Input buffer for new DLL path
+	static char szDllPathInput[1024] = "";      // Input buffer for new DLL path
+	static char szFilterText[128] = "";         // Filter input buffer
 
-	static char szFilterText[128] = "";        // Filter input buffer
 	static std::string previousFilter = "";
+	static int selectedProcessIndex = -1;
 
 	constexpr ImGuiWindowFlags nFlags = ImGuiWindowFlags_NoResize |
 		ImGuiWindowFlags_NoSavedSettings |
@@ -300,7 +437,7 @@ void Menu::Render()
 		ImGuiWindowFlags_NoMove;
 
 	ImGui::SetNextWindowPos({ 0, 0 });
-	ImGui::SetNextWindowSize({ 1100.0f, 600.0f }); // Adjust window size as needed
+	ImGui::SetNextWindowSize({ 1100.0f, 600.0f });
 
 	if (ImGui::Begin("VenomInject", &g_bIsRunning, nFlags))
 	{
@@ -308,131 +445,35 @@ void Menu::Render()
 		{
 			if (ImGui::BeginTabItem("Main"))
 			{
-				// Filter input
-				ImGui::InputText("Filter", szFilterText, IM_ARRAYSIZE(szFilterText));
+				// Render the Filter and Refresh UI
+				RenderFilterAndRefresh(vecAllProcesses, vecFilteredProcesses, szFilterText, previousFilter);
+
+				// Render the DLL input
+				RenderDllInput(addedDlls, szDllPathInput);
+
+				ImGui::BeginGroup(); // Grouping for layout purposes
+
+				// Render Process Table
+				RenderProcessTable(vecFilteredProcesses, selectedProcessIndex);
+
+				ImGui::Spacing();
+
+				// Render the "Inject DLL" button
+				RenderInjectionButton(vecFilteredProcesses, selectedProcessIndex, addedDlls);
+
+				ImGui::EndGroup(); // End layout group
+
 				ImGui::SameLine();
 
-				// Refresh process list
-				if (ImGui::Button("Refresh"))
-				{
-					allProcesses = GetProcessList();
-					vecFilteredProcesses = allProcesses; // Reset filtered list
-				}
-
-				// Apply filtering logic when filter text changes
-				if (previousFilter != szFilterText)
-				{
-					previousFilter = szFilterText;
-					vecFilteredProcesses.clear();
-
-					for (const auto& process : allProcesses)
-					{
-						std::wstring nameLower = process.name;
-						std::wstring filterLower = std::wstring(szFilterText, szFilterText + strlen(szFilterText));
-
-						// Convert to lowercase for case-insensitive comparison
-						std::transform(nameLower.begin(), nameLower.end(), nameLower.begin(), ::towlower);
-						std::transform(filterLower.begin(), filterLower.end(), filterLower.begin(), ::towlower);
-
-						if (nameLower.find(filterLower) != std::wstring::npos)
-							vecFilteredProcesses.push_back(process);
-					}
-				}
-
-				// DLL Path input and Add button
-				ImGui::InputText("DLL Path", szDllPathInput, sizeof(szDllPathInput));
-				ImGui::SameLine();
-				// Open File Explorer Dialog
-				if (ImGui::Button("Browse"))
-				{
-					std::string selectedPath = Utilities::OpenFileExplorerDialog();
-					if (!selectedPath.empty())
-					{
-						strncpy_s(szDllPathInput, selectedPath.c_str(), sizeof(szDllPathInput) - 1);
-						szDllPathInput[sizeof(szDllPathInput) - 1] = '\0'; // Ensure null termination
-					}
-				}
-				ImGui::SameLine();
-				if (ImGui::Button("Add DLL"))
-				{
-					if (strlen(szDllPathInput) > 0)
-					{
-						addedDlls.push_back(std::string(szDllPathInput));
-						szDllPathInput[0] = '\0'; // Clear input after adding
-					}
-				}
-
-				// Layout adjustment to display tables side by side
-				ImGui::BeginGroup(); // Group for layout
-
-				// Start Process Table on the left
-				ImGui::BeginChild("ProcessTableChild", ImVec2(400, 300), true); // Fixed size for ProcessTable
-				if (ImGui::BeginTable("ProcessTable", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY))
-				{
-					// Process Table Columns: PID and Process Name
-					ImGui::TableSetupColumn("PID", ImGuiTableColumnFlags_WidthFixed, 80.0f);  // Fixed width for PID column
-					ImGui::TableSetupColumn("Process Name", ImGuiTableColumnFlags_WidthFixed, 200.0f);  // Reduced width for Process Name column
-					ImGui::TableHeadersRow();
-
-					// Iterate over filtered processes and render rows
-					for (size_t i = 0; i < vecFilteredProcesses.size(); ++i)
-					{
-						const auto& process = vecFilteredProcesses[i];
-
-						ImGui::TableNextRow();
-
-						// PID column
-						ImGui::TableSetColumnIndex(0);
-						ImGui::Text("%d", process.pid);
-
-						// Process Name column
-						ImGui::TableSetColumnIndex(1);
-						ImGui::TextUnformatted(std::string(process.name.begin(), process.name.end()).c_str());
-					}
-
-					ImGui::EndTable();
-				}
-				ImGui::EndChild(); // End Process Table
-
-				ImGui::SameLine(); // Place DllTable to the right of the ProcessTable
-
-				// Start DLL Table on the right
-				ImGui::BeginChild("DllTableChild", ImVec2(500, 300), true); // Fixed size for DllTable
-				if (ImGui::BeginTable("DllTable", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
-				{
-					// Add columns for DLL Path and Platform
-					ImGui::TableSetupColumn("DLL Path", ImGuiTableColumnFlags_WidthStretch);
-					ImGui::TableSetupColumn("Platform", ImGuiTableColumnFlags_WidthFixed, 100.0f); // Fixed width for Platform column
-					ImGui::TableHeadersRow();
-
-					// Display added DLLs in the table
-					for (size_t i = 0; i < addedDlls.size(); ++i)
-					{
-						ImGui::TableNextRow();
-
-						// DLL Path column
-						ImGui::TableSetColumnIndex(0);
-						ImGui::TextUnformatted(addedDlls[i].c_str());
-
-						// Platform column
-						ImGui::TableSetColumnIndex(1);
-						std::string platform = Utilities::GetDllPlatform(addedDlls[i].c_str());
-						ImGui::TextUnformatted(platform.c_str());
-					}
-
-					ImGui::EndTable();
-				}
-				ImGui::EndChild(); // End DLL Table
-
-				ImGui::EndGroup(); // End grouping for layout
+				// Render DLL Table
+				RenderDllTable(addedDlls);
 
 				ImGui::EndTabItem();
 			}
 
-			// Settings Tab
 			if (ImGui::BeginTabItem("Settings"))
 			{
-				ImGui::Combo("Injection Method", reinterpret_cast<int*>(&Vars::g_nInjectionMethod), Injector::g_szMethodNames, Injector::GetMethodCount());
+				RenderSettingsTab();
 				ImGui::EndTabItem();
 			}
 

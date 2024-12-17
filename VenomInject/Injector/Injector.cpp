@@ -5,7 +5,7 @@
 
 #include <stdexcept>
 
-void Injector::Inject(HANDLE hProcess, const char* szDllPath, Method_e nInjectionMethod)
+void Injector::InjectInternal(HANDLE hProcess, const char* szDllPath, Method_e nInjectionMethod)
 {
     switch (nInjectionMethod)
     {
@@ -19,4 +19,10 @@ void Injector::Inject(HANDLE hProcess, const char* szDllPath, Method_e nInjectio
         throw std::runtime_error("Invalid injection method!");
         break;
     }
+}
+
+void Injector::Inject(HANDLE hProcess, std::vector<std::string> szDllPaths, Method_e nInjectionMethod)
+{
+	for (const auto& szDllPath : szDllPaths)
+		InjectInternal(hProcess, szDllPath.c_str(), nInjectionMethod);
 }

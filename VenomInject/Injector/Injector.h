@@ -1,6 +1,8 @@
 #pragma once
 
 #include <Windows.h>
+#include <vector>
+#include <string>
 
 namespace Injector
 {
@@ -22,5 +24,6 @@ namespace Injector
 		return sizeof(g_szMethodNames) / sizeof(g_szMethodNames[0]);
 	}
 
-	void Inject(HANDLE hProcess, const char* szDllPath, Method_e nInjectionMethod);
+	void InjectInternal(HANDLE hProcess, const char* szDllPath, Method_e nInjectionMethod);
+	void Inject(HANDLE hProcess, std::vector<std::string> szDllPaths, Method_e nInjectionMethod);
 }
