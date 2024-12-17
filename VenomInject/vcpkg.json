@@ -1,0 +1,11 @@
+{
+    "dependencies": [
+        {
+            "name": "imgui",
+            "features": [
+                "win32-binding",
+                "dx9-binding"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,3 @@
+[submodule "external/CompileTimeRandom"]
+	path = external/CompileTimeRandom
+	url = https://github.com/Jasper1467/CompileTimeRandom.git

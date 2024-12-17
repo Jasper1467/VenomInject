@@ -1,0 +1,6 @@
+Package: imgui
+Feature: dx11-binding
+Architecture: x64-windows-static
+Multi-Arch: same
+Description: Make available DirectX11 binding
+Status: purge ok not-installed
